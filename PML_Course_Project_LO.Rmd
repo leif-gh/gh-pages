@@ -1,0 +1,143 @@
+---
+output: html_document
+---
+#Analyses of gym motion characteristics using machine learning approach.#
+#####Leif Olausson, June 2015#####
+
+###Overview###
+This short project report describes the analysis of weight lifting exercise characteristics based on data from sensors mounted on the arms, forearms and belt and on the weight (dumbbell).The approach is to explore and "clean" the data to make it appropriate for training a machine learning algorithm. Estimates of accuracy are performed. The final model is tested with, in addition to the validation set partition, a supplied test data set. 
+
+The report is of the form "reproducible research" using R Markdown.
+
+For more information about the data and setup see http://groupware.les.inf.puc-rio.br/har.
+
+###Downloading and exploring the data###
+Training and testing data sets are supplied as input for the project.
+
+```
+# Download the data
+# working directory
+  if(!file.exists("PML_Project"))  {dir.create("PML_Project")}
+# download
+  fileUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv?accessType=DOWNLOAD"
+  download.file(fileUrl, destfile = "./PML_Project/training.csv")
+  fileUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv?accessType=DOWNLOAD"
+  download.file(fileUrl, destfile = "./PML_Project/testing.csv")
+# loading
+  training <- read.table("./PML_Project/training.csv", sep= ",", header = TRUE) #Training set
+  testing <- read.table("./PML_Project/testing.csv", sep= ",", header = TRUE)   #for test to be submitted
+```
+
+Using the dim, head, names, summary and str functions gives an insight into the data. The training set consists of 19622 observations of 160 variables.The first seven variables are of  a "house keeping" kind to keep track of main structural parameters (users, time stamp etc). Those are not of interest in this study and will be removed from the data set. 
+
+A near zero value analysis will be done to identify variables with low contribution to the explanation of the variability of the data. The number of variables in this category is about sixty.Those variables are also removed from the training set.
+
+Furthermore a number of variables consists to the main part of NAs, typically 19 216 out of 19 622 (98%). Those variables represent derived data or some special characteristics of the movements like max, min amplitude etc. Those variables are also removed.
+
+The code used to produce the training data set used in the algorith is as seen below. The resulting training set is of dimension 19 622 observations and 53 variables.
+
+####<br/>Removing near zero variables.####
+```
+  # Identifying and removing near zero value variablessv variables
+  nsv_list <- nearZeroVar(training, saveMetrics = FALSE)    # postion of nsv variables (columns)
+  training_nsv_list <- training[, -c(nsv_list)]           # removing nsv variables from training set
+```
+
+####<br/>Removing variables with predominantly NAs (98%).####
+```
+# Identifying and removing variables with prdominantly NAs (98%)
+# Identyfing with function colSums() columns with NA and finding position with function() is.na
+  na_col_sums <- colSums(training_nsv_list[, 6:99], na.rm = FALSE)
+  list_na <- which(is.na(na_col_sums)) + 5  # The first variables not suitable for colSums
+# Removing the NA columns
+  training_nsv_na <- training_nsv_list[, -c(list_na)]
+```
+
+####<br/>Removing the "administrative" variables.####
+```
+# Removing six variables not necessary for the training of the model
+  training_new <- training_nsv_na[, -c(1:6)]   # The final training set
+```
+
+###Training and tuning with random forests.###
+Preliminary test indicated long execution times with existing hardware. 
+
+####<br/>Small training set partition for intial training test####
+The exploration was initially performed with a smaller than normal training dataset.
+```
+# Creating a small training dataset - 15% of data for training and 85% for testing (validation)
+  training_new_Partition = createDataPartition(training_new$classe, p=0.15, list=F)
+  training_15 <- training_new[training_new_Partition, ]
+  testing_85 <- training_new[-training_new_Partition, ]
+# Tuning and training test with random forest and lax cross validation requirement
+  fitControl <- trainControl(method = "repeatedcv", number = 2, repeats = 1)
+  modFit_15 <- train(training_15$classe ~., data=training_15, method="rf", trControl = fitControl, prox=TRUE)
+```
+
+The OOB error estimate and confusion matrix is given by modFit_15$finalModel. OOB changed from 4.1 to 3.7% when K-fold cross validation and repeat was changed from initial (2, 1) to (3, 2). In order to significantly improve OOB the training set will have to larger. 
+
+####<br/>More equal split between training and testing data.####
+A more normal split of the data is 60/40. Training with cv folds as 2 and repeat equal to 1 results in the following.
+
+```
+# Result of training on 60% of the data set and cv folds as 2 and repeat equal to 1
+  modFit_60$finalModel
+
+# Call:
+#  randomForest(x = x, y = y, mtry = param$mtry, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 500
+# No. of variables tried at each split: 27
+#
+#         OOB estimate of  error rate: 0.93%
+# Confusion matrix:
+#      A    B    C    D    E class.error
+# A 3342    6    0    0    0 0.001792115
+# B   22 2248    8    1    0 0.013602457
+# C    0   19 2028    7    0 0.012658228
+# D    0    2   33 1894    1 0.018652850
+# E    0    0    3    8 2154 0.005080831
+```
+
+The resulting OOB error estimate for the 60/40 split is thus 0.93% on the training set.This would imply a misclassification rate (out of sample error) of approximately 1% on the test (validation) set (with 40% of the data). 
+
+####<br/>Prediction and comparison using the test set.####
+```
+# Predicting and comparing the outcome using the 40% remaining data in the test set
+  pred_testing_40 <- predict(modFit_60,testing_40)
+  table(pred_testing_40,testing_40$classe)
+               
+  pred_testing_40    A    B    C    D    E
+                A 2225   11    0    0    0
+                B    5 1501   14    0    1
+                C    0    6 1352   16    3
+                D    0    0    2 1268   10
+                E    2    0    0    2 1428
+```
+The misclassification rate (out of sample error) is 0.92% thus approximately 1%.
+
+####<br/>Submission.####
+The result to be submitted using the separately downloaded test set "testing" is obtained as follows.
+
+```
+# Submission result
+  pred_testing_submission <- predict(modFit_60,testing)
+```
+
+###Further model testing.###
+A further test has been performed to get a perspective on the performance of the chosen rondom forests model (modFit_60).
+
+####<br/>Limiting the model to using the 20 most influential predictors####
+A further refinement could be to reduce the number of variables and just use the most importanat ones (20 predictors instead of 52). The main reason would be to reduce running time and be able to increase the cv folds number.
+
+```
+# Most important variables
+  rfImp <- varImp(modFit_60, scale = FALSE)
+  var_no <- c(which(rfImp$importance[, 1]>152.9), 53)
+  training_60_impvar <- training_60[, var_no]
+```
+With the same training parameters as for modFit_60 the OOB estimate of error rate increased from 0.9 to 1.2. The running time was more than halved.
+
+###Concluding remarks###
+
+The analyses of data from motion sensors on the body shows that it is possible to distinguish between different motion patterns using machine learning techniques. In this study various techniques were used for exploring, training and tuning the data and models. The final model is based on the random forest algorithm. The misclassification rate reached was approximately 1% within reasonable execution times for training the algorithms. 
